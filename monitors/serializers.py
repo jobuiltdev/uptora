@@ -30,6 +30,8 @@ class MonitorSerializer(serializers.ModelSerializer):
             'is_enabled',
             'interval_seconds',
             'timeout_seconds',
+            'expected_text',
+            'expected_selector',
             'has_open_incident',
             'created_at',
             'updated_at',
@@ -66,6 +68,8 @@ class CheckResultSerializer(serializers.ModelSerializer):
             'response_time_ms',
             'error_type',
             'error_message',
+            'final_url',
+            'screenshot',
             'ssl_expires_at',
             'ssl_days_remaining',
         )

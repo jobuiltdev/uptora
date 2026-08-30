@@ -28,6 +28,7 @@ site does is caught and recorded as a failed check. Anything *we* get wrong is
 allowed to propagate. See execute_monitor for why.
 """
 
+from django.core.files.base import ContentFile
 from django.utils import timezone
 
 from incidents.services import process_check_result
@@ -35,7 +36,21 @@ from monitors.checks import CheckOutcome, run_check, summarize
 from monitors.models import CheckResult, ErrorType
 
 
-def record_check(monitor, transport=None):
+def attach_screenshot(check_result, data):
+    """Save failure evidence against a result, best effort.
+
+    Written through the FileField, so the bytes go to whatever storage backend
+    is configured and never into a database column. A storage failure is
+    swallowed on purpose: the observation is already recorded, and losing a
+    screenshot must not turn a truthful check into a failed pipeline.
+    """
+    try:
+        check_result.screenshot.save('screenshot.png', ContentFile(data), save=True)
+    except Exception:  # noqa: BLE001 - evidence must never displace the finding
+        pass
+
+
+def record_check(monitor, transport=None, session_factory=None):
     """Stage 1. Run the check for `monitor` and persist exactly one CheckResult.
 
     The only function in the pipeline that touches the network, and the only one
@@ -49,15 +64,20 @@ def record_check(monitor, transport=None):
     started_at = timezone.now()
 
     try:
-        outcome = run_check(monitor, now=started_at, transport=transport)
+        outcome = run_check(
+            monitor, now=started_at, transport=transport, session_factory=session_factory
+        )
     except Exception as exc:  # noqa: BLE001 - a bad target must not kill the runner
         outcome = CheckOutcome.failure(ErrorType.UNKNOWN_ERROR, summarize(exc))
 
-    return CheckResult.objects.create(
+    result = CheckResult.objects.create(
         monitor=monitor,
         checked_at=started_at,
         **outcome.as_result_fields(),
     )
+    if outcome.screenshot:
+        attach_screenshot(result, outcome.screenshot)
+    return result
 
 
 def process_recorded_result(check_result_id):
@@ -71,7 +91,7 @@ def process_recorded_result(check_result_id):
     return process_check_result(CheckResult.objects.get(pk=check_result_id))
 
 
-def execute_monitor(monitor, transport=None):
+def execute_monitor(monitor, transport=None, session_factory=None):
     """Run both stages for one monitor and return the recorded CheckResult.
 
     Incident processing runs after the result is committed and is intentionally
@@ -86,6 +106,6 @@ def execute_monitor(monitor, transport=None):
     observation stored and unprocessed. Retrying is process_recorded_result on
     that result's id, which never repeats the request.
     """
-    result = record_check(monitor, transport=transport)
+    result = record_check(monitor, transport=transport, session_factory=session_factory)
     process_recorded_result(result.pk)
     return result

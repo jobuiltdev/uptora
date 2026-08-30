@@ -194,6 +194,18 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
+
+# Media files
+# https://docs.djangoproject.com/en/6.1/topics/files/
+#
+# Failure screenshots are written through Django's storage API, so switching to
+# an S3-compatible backend later is a STORAGES change and nothing more. The
+# local filesystem is fine for development; serving these in production needs an
+# access-controlled view, since the media root is not behind authentication.
+
+MEDIA_ROOT = BASE_DIR / 'media'
+MEDIA_URL = 'media/'
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 

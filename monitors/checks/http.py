@@ -4,9 +4,9 @@ Everything here is pure: given a URL and a timeout it returns a CheckOutcome. No
 database, no Django request, no logging side effects, so the same call works
 from a view today and from a Celery task later.
 
-Redirects are followed by hand rather than with httpx's follow_redirects. Each
-hop has to go back through the SSRF gate, and letting httpx follow them would
-mean hop two lands wherever it likes, unchecked.
+The fetching itself lives in monitors.checks.fetching, which validates and pins
+every redirect hop. The browser gate uses the same primitive, so there is one
+SSRF implementation rather than two that can drift apart.
 """
 
 import ssl
@@ -16,55 +16,15 @@ import httpx
 
 from monitors.checks import tls
 from monitors.checks.base import CheckOutcome, summarize
+from monitors.checks.fetching import TooManyRedirectsError, fetch_validated
 from monitors.models import ErrorType
-from monitors.ssrf import (
-    BlockedTargetError,
-    TargetResolutionError,
-    resolve_target,
-)
+from monitors.ssrf import BlockedTargetError, TargetResolutionError
 
 USER_AGENT = 'Uptora-Monitor/1.0 (+https://uptora.example)'
-
-MAX_REDIRECTS = 5
 
 # Anything the origin answers with below 400 counts as reachable, redirects
 # included: a 3xx that we stopped following is still a live server.
 SUCCESS_STATUS_CEILING = 400
-
-
-class TooManyRedirectsError(Exception):
-    """The redirect chain did not terminate within MAX_REDIRECTS hops."""
-
-
-def build_request(url, target):
-    """Build a request aimed at the validated IP but addressed to the hostname.
-
-    The URL host is swapped for the pinned address so no second DNS lookup can
-    happen between validation and connection. The original host is restored in
-    the Host header, and passed as SNI so certificate verification still runs
-    against the real hostname rather than the bare IP.
-    """
-    pinned = httpx.URL(url).copy_with(host=target.ip, port=target.port)
-    headers = {'Host': target.host_header, 'User-Agent': USER_AGENT}
-    extensions = {'sni_hostname': target.hostname} if target.is_tls else {}
-    return httpx.Request('GET', pinned, headers=headers, extensions=extensions)
-
-
-def fetch(client, url):
-    """Follow the redirect chain, validating and pinning every hop.
-
-    Returns the final response together with the target it came from.
-    """
-    current_url = url
-    for _ in range(MAX_REDIRECTS + 1):
-        target = resolve_target(current_url)
-        response = client.send(build_request(current_url, target))
-        # has_redirect_location, not is_redirect: the latter is true for any 3xx,
-        # including one with no Location header, which is a final response.
-        if not response.has_redirect_location:
-            return response, target
-        current_url = str(httpx.URL(current_url).join(response.headers['location']))
-    raise TooManyRedirectsError(f'Exceeded {MAX_REDIRECTS} redirects starting from {url}.')
 
 
 def has_tls_cause(exc):
@@ -127,7 +87,8 @@ def run_http_check(url, timeout_seconds, now, transport=None):
     )
     try:
         with client:
-            response, target = fetch(client, url)
+            fetched = fetch_validated(client, url, headers={'User-Agent': USER_AGENT})
+            response, target, final_url = fetched.response, fetched.target, fetched.final_url
     except BlockedTargetError as exc:
         return CheckOutcome.failure(ErrorType.BLOCKED_TARGET, exc)
     except TargetResolutionError as exc:
@@ -152,6 +113,7 @@ def run_http_check(url, timeout_seconds, now, transport=None):
         is_success=is_success,
         status_code=response.status_code,
         response_time_ms=response_time_ms,
+        final_url=final_url,
         error_type=None if is_success else ErrorType.HTTP_ERROR,
         error_message=None
         if is_success

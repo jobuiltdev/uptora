@@ -80,8 +80,8 @@ class TestMonitorCrud:
         assert 'website' in response.json()
         assert not Monitor.objects.exists()
 
-    @pytest.mark.parametrize('monitor_type', ['BROWSER', 'FLOW', 'PING', 'http'])
-    def test_only_http_monitors_are_accepted(self, auth_client, website, monitor_type):
+    @pytest.mark.parametrize('monitor_type', ['FLOW', 'PING', 'http', 'CHROME'])
+    def test_unsupported_monitor_types_are_rejected(self, auth_client, website, monitor_type):
         response = auth_client.post(
             reverse(LIST_URL), payload(website, monitor_type=monitor_type), format='json'
         )

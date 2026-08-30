@@ -9,6 +9,9 @@ DJANGO_SETTINGS_MODULE = "config.settings"
 python_files = ["test_*.py", "*_test.py"]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = [
+    "browser: drives a real headless Chromium; skipped when it is not installed",
+]
 
 [tool.ruff]
 line-length = 100

@@ -1,3 +1,5 @@
+import secrets
+
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
@@ -22,12 +24,12 @@ DEFAULT_TIMEOUT_SECONDS = 10
 class MonitorType(models.TextChoices):
     """Kinds of check Uptora can run.
 
-    Only HTTP exists today. BROWSER and FLOW members are added here when the
-    Playwright runner lands; the API rejects anything not listed, so a new
-    member is the single place that has to change.
+    FLOW joins these when user-flow monitoring lands; the API rejects anything
+    not listed, so a new member is the single place that has to change.
     """
 
     HTTP = 'HTTP', 'HTTP'
+    BROWSER = 'BROWSER', 'Browser'
 
 
 class ErrorType(models.TextChoices):
@@ -44,6 +46,15 @@ class ErrorType(models.TextChoices):
     HTTP_ERROR = 'HTTP_ERROR', 'HTTP error'
     TOO_MANY_REDIRECTS = 'TOO_MANY_REDIRECTS', 'Too many redirects'
     BLOCKED_TARGET = 'BLOCKED_TARGET', 'Blocked target'
+
+    # Browser checks. Network-level failures reuse the members above, because a
+    # DNS failure is the same fact however it was observed.
+    BROWSER_TIMEOUT = 'BROWSER_TIMEOUT', 'Browser timeout'
+    NAVIGATION_ERROR = 'NAVIGATION_ERROR', 'Navigation error'
+    EXPECTED_TEXT_MISSING = 'EXPECTED_TEXT_MISSING', 'Expected text missing'
+    EXPECTED_SELECTOR_MISSING = 'EXPECTED_SELECTOR_MISSING', 'Expected selector missing'
+    BROWSER_ERROR = 'BROWSER_ERROR', 'Browser error'
+
     UNKNOWN_ERROR = 'UNKNOWN_ERROR', 'Unknown error'
 
 
@@ -79,6 +90,16 @@ class Monitor(models.Model):
             MaxValueValidator(MAX_TIMEOUT_SECONDS),
         ],
     )
+    # Browser expectations. Two plain nullable fields rather than a JSON blob:
+    # there are only two of them, they are queryable, and a schema change is a
+    # visible migration instead of a silently reshaped document.
+    #
+    # Both are optional. A browser check with neither set still means something
+    # useful: the page loaded and rendered without a fatal error. HTTP monitors
+    # simply never read these, so leaving them set on one is harmless.
+    expected_text = models.CharField(max_length=200, null=True, blank=True)
+    expected_selector = models.CharField(max_length=200, null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -92,6 +113,16 @@ class Monitor(models.Model):
     def owner(self):
         """Convenience accessor. The website is the single source of ownership."""
         return self.website.owner
+
+
+def screenshot_path(instance, filename):
+    """Give every screenshot an unguessable name.
+
+    The stored name ignores whatever the caller passed: a sequential or
+    predictable path would let anyone who can reach the media store enumerate
+    other customers' failure screenshots.
+    """
+    return f'check-screenshots/{timezone.now():%Y/%m}/{secrets.token_urlsafe(24)}.png'
 
 
 class CheckResult(models.Model):
@@ -118,6 +149,16 @@ class CheckResult(models.Model):
     )
     # Capped on purpose: a concise summary, never a stack trace.
     error_message = models.CharField(max_length=500, null=True, blank=True)
+    # Where the check actually ended up, after any redirects.
+    final_url = models.URLField(max_length=500, null=True, blank=True)
+    # Evidence for a failure, stored through Django's storage API so moving to
+    # S3 is a settings change. Never populated for a successful check.
+    screenshot = models.FileField(
+        upload_to=screenshot_path,
+        max_length=255,
+        null=True,
+        blank=True,
+    )
     ssl_expires_at = models.DateTimeField(null=True, blank=True)
     # Signed, so an already-expired certificate reads as a negative number.
     ssl_days_remaining = models.IntegerField(null=True, blank=True)

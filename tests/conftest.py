@@ -1,3 +1,6 @@
+import shutil
+import tempfile
+
 import pytest
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -5,7 +8,7 @@ from django.core.cache import cache
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from monitors.models import Monitor
+from monitors.models import Monitor, MonitorType
 from websites.models import Website
 
 User = get_user_model()
@@ -13,10 +16,23 @@ User = get_user_model()
 PASSWORD = 'uptora-test-pass-42'
 
 
+MEDIA_TMPDIR = None
+
+
 def pytest_configure():
     """Test-only overrides. config.settings is untouched, so dev and production
-    keep Django's real password hashers."""
+    keep Django's real password hashers and real media root."""
+    global MEDIA_TMPDIR
     settings.PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']
+    # Screenshots are written through Django storage, so point it somewhere
+    # disposable rather than letting tests litter the project's media root.
+    MEDIA_TMPDIR = tempfile.mkdtemp(prefix='uptora-test-media-')
+    settings.MEDIA_ROOT = MEDIA_TMPDIR
+
+
+def pytest_unconfigure():
+    if MEDIA_TMPDIR:
+        shutil.rmtree(MEDIA_TMPDIR, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
@@ -78,3 +94,8 @@ def monitor(website):
 @pytest.fixture
 def other_monitor(other_website):
     return Monitor.objects.create(website=other_website)
+
+
+@pytest.fixture
+def browser_monitor(website):
+    return Monitor.objects.create(website=website, monitor_type=MonitorType.BROWSER)

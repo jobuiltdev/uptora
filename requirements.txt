@@ -2,6 +2,7 @@ Django==6.1
 httpx==0.28.1
 djangorestframework==3.18.0
 djangorestframework-simplejwt==5.5.1
+playwright==1.62.0
 psycopg[binary]==3.3.4
 python-dotenv==1.2.3
 
@@ -9,3 +10,7 @@ python-dotenv==1.2.3
 pytest==9.1.1
 pytest-django==4.14.0
 ruff==0.16.5
+
+# Browser monitoring needs the Chromium build too, which pip does not
+# install. After pip install, run:
+#     playwright install chromium

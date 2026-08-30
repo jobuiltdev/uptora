@@ -24,6 +24,11 @@ def summarize(value):
     return message
 
 
+# Not a column. The screenshot is a file, saved through Django storage by the
+# persistence layer rather than written into the row.
+NON_COLUMN_FIELDS = frozenset({'screenshot'})
+
+
 @dataclass(frozen=True)
 class CheckOutcome:
     """What a single check observed, before it is persisted."""
@@ -33,8 +38,11 @@ class CheckOutcome:
     response_time_ms: int | None = None
     error_type: str | None = None
     error_message: str | None = None
+    final_url: str | None = None
     ssl_expires_at: object | None = None
     ssl_days_remaining: int | None = None
+    # Evidence bytes for a failed browser check, or None. Always None on success.
+    screenshot: bytes | None = None
 
     @classmethod
     def failure(cls, error_type, message, **extra):
@@ -46,4 +54,7 @@ class CheckOutcome:
         )
 
     def as_result_fields(self):
-        return asdict(self)
+        """The values that map directly onto CheckResult columns."""
+        return {
+            name: value for name, value in asdict(self).items() if name not in NON_COLUMN_FIELDS
+        }
