@@ -1,3 +1,4 @@
+from django.db.models import Exists, OuterRef
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import APIException
@@ -5,6 +6,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
+from incidents.models import Incident, IncidentStatus
 from monitors.execution import execute_monitor
 from monitors.models import Monitor
 from monitors.serializers import CheckResultSerializer, MonitorSerializer
@@ -40,7 +42,12 @@ class MonitorViewSet(viewsets.ModelViewSet):
     serializer_class = MonitorSerializer
 
     def get_queryset(self):
-        return Monitor.objects.filter(website__owner=self.request.user).select_related('website')
+        open_incidents = Incident.objects.filter(monitor=OuterRef('pk'), status=IncidentStatus.OPEN)
+        return (
+            Monitor.objects.filter(website__owner=self.request.user)
+            .select_related('website')
+            .annotate(has_open_incident=Exists(open_incidents))
+        )
 
     def get_throttles(self):
         # Running a monitor makes an outbound request on demand, so it gets a

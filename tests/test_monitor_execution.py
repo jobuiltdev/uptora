@@ -242,12 +242,16 @@ class TestSslMetadata:
         assert result.ssl_days_remaining == 30
 
     def test_expired_certificate_reports_negative_days(self, monitor, monkeypatch):
-        expires_at = timezone.now() - timedelta(days=3)
+        # An hour of slack keeps this off the whole-day boundary: the clock the
+        # check reads is always a little later than this one, and days are
+        # floored, so a cert 3d1h expired reads as -4 rather than flipping
+        # between -3 and -4 with timer granularity.
+        expires_at = timezone.now() - timedelta(days=3, hours=1)
         monkeypatch.setattr(tls, 'inspect_certificate', lambda **kwargs: expires_at)
 
         result = execute_monitor(monitor, transport=responder(200))
 
-        assert result.ssl_days_remaining == -3
+        assert result.ssl_days_remaining == -4
 
     def test_plain_http_target_has_no_ssl_metadata(self, website, monitor, monkeypatch):
         website.url = 'http://example.com/status'

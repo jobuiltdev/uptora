@@ -121,6 +121,11 @@ class CheckResult(models.Model):
     ssl_expires_at = models.DateTimeField(null=True, blank=True)
     # Signed, so an already-expired certificate reads as a negative number.
     ssl_days_remaining = models.IntegerField(null=True, blank=True)
+    # Pipeline bookkeeping, not part of the observation: stamped once the
+    # incident engine has consumed this result. What the check saw stays
+    # immutable; this only records that it has been acted on, and it is what
+    # makes reprocessing the same result a no-op.
+    incident_processed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ('-checked_at', '-id')

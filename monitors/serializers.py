@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from incidents.models import Incident, IncidentStatus
 from monitors.models import CheckResult, Monitor
 from websites.models import Website
 
@@ -18,6 +19,7 @@ class OwnedWebsiteField(serializers.PrimaryKeyRelatedField):
 
 class MonitorSerializer(serializers.ModelSerializer):
     website = OwnedWebsiteField()
+    has_open_incident = serializers.SerializerMethodField()
 
     class Meta:
         model = Monitor
@@ -28,10 +30,26 @@ class MonitorSerializer(serializers.ModelSerializer):
             'is_enabled',
             'interval_seconds',
             'timeout_seconds',
+            'has_open_incident',
             'created_at',
             'updated_at',
         )
         read_only_fields = ('id', 'created_at', 'updated_at')
+
+    def get_has_open_incident(self, monitor):
+        """Whether this monitor is currently down.
+
+        A single flag rather than embedded incident history: a list of monitors
+        needs to show a status dot, and anything more belongs on /api/incidents/.
+
+        The list and detail views annotate this so a page of monitors costs one
+        query. Create and update responses serialize a freshly saved instance
+        that carries no annotation, so those fall back to a single exists().
+        """
+        annotated = getattr(monitor, 'has_open_incident', None)
+        if annotated is not None:
+            return annotated
+        return Incident.objects.filter(monitor=monitor, status=IncidentStatus.OPEN).exists()
 
 
 class CheckResultSerializer(serializers.ModelSerializer):
