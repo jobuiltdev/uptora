@@ -1,1 +1,136 @@
-# Models for the monitors app are added in a later milestone.
+from django.core.validators import MaxValueValidator, MinValueValidator
+from django.db import models
+from django.utils import timezone
+
+# Minimums exist so a user cannot configure Uptora into hammering a target or
+# holding a worker open indefinitely.
+#
+#   interval: 60s .. 24h   - one check a minute is the tightest schedule we are
+#                            willing to run per monitor.
+#   timeout:  1s  .. 30s   - deliberately below the minimum interval, so a check
+#                            always finishes before the next one is due and runs
+#                            can never pile up on top of each other.
+MIN_INTERVAL_SECONDS = 60
+MAX_INTERVAL_SECONDS = 24 * 60 * 60
+DEFAULT_INTERVAL_SECONDS = 300
+
+MIN_TIMEOUT_SECONDS = 1
+MAX_TIMEOUT_SECONDS = 30
+DEFAULT_TIMEOUT_SECONDS = 10
+
+
+class MonitorType(models.TextChoices):
+    """Kinds of check Uptora can run.
+
+    Only HTTP exists today. BROWSER and FLOW members are added here when the
+    Playwright runner lands; the API rejects anything not listed, so a new
+    member is the single place that has to change.
+    """
+
+    HTTP = 'HTTP', 'HTTP'
+
+
+class ErrorType(models.TextChoices):
+    """Stable, machine-readable failure taxonomy.
+
+    These values are written to the database and will be read by alerting rules,
+    so treat them as an API: add members, never rename or repurpose them.
+    """
+
+    TIMEOUT = 'TIMEOUT', 'Timeout'
+    DNS_ERROR = 'DNS_ERROR', 'DNS error'
+    CONNECTION_ERROR = 'CONNECTION_ERROR', 'Connection error'
+    TLS_ERROR = 'TLS_ERROR', 'TLS error'
+    HTTP_ERROR = 'HTTP_ERROR', 'HTTP error'
+    TOO_MANY_REDIRECTS = 'TOO_MANY_REDIRECTS', 'Too many redirects'
+    BLOCKED_TARGET = 'BLOCKED_TARGET', 'Blocked target'
+    UNKNOWN_ERROR = 'UNKNOWN_ERROR', 'Unknown error'
+
+
+class Monitor(models.Model):
+    """A recurring check configured against one website.
+
+    Ownership is derived from the website rather than stored again here, so
+    there is exactly one place a row's owner can come from.
+    """
+
+    website = models.ForeignKey(
+        'websites.Website',
+        on_delete=models.CASCADE,
+        related_name='monitors',
+    )
+    monitor_type = models.CharField(
+        max_length=16,
+        choices=MonitorType.choices,
+        default=MonitorType.HTTP,
+    )
+    is_enabled = models.BooleanField(default=True)
+    interval_seconds = models.PositiveIntegerField(
+        default=DEFAULT_INTERVAL_SECONDS,
+        validators=[
+            MinValueValidator(MIN_INTERVAL_SECONDS),
+            MaxValueValidator(MAX_INTERVAL_SECONDS),
+        ],
+    )
+    timeout_seconds = models.PositiveIntegerField(
+        default=DEFAULT_TIMEOUT_SECONDS,
+        validators=[
+            MinValueValidator(MIN_TIMEOUT_SECONDS),
+            MaxValueValidator(MAX_TIMEOUT_SECONDS),
+        ],
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ('-created_at', '-id')
+
+    def __str__(self):
+        return f'{self.get_monitor_type_display()} monitor for {self.website.url}'
+
+    @property
+    def owner(self):
+        """Convenience accessor. The website is the single source of ownership."""
+        return self.website.owner
+
+
+class CheckResult(models.Model):
+    """One recorded execution of a monitor.
+
+    Conceptually immutable: rows are appended, never edited. Nothing in the API
+    updates a result, and the history is only ever read newest-first.
+    """
+
+    monitor = models.ForeignKey(
+        Monitor,
+        on_delete=models.CASCADE,
+        related_name='results',
+    )
+    checked_at = models.DateTimeField(default=timezone.now)
+    is_success = models.BooleanField()
+    status_code = models.PositiveSmallIntegerField(null=True, blank=True)
+    response_time_ms = models.PositiveIntegerField(null=True, blank=True)
+    error_type = models.CharField(
+        max_length=32,
+        choices=ErrorType.choices,
+        null=True,
+        blank=True,
+    )
+    # Capped on purpose: a concise summary, never a stack trace.
+    error_message = models.CharField(max_length=500, null=True, blank=True)
+    ssl_expires_at = models.DateTimeField(null=True, blank=True)
+    # Signed, so an already-expired certificate reads as a negative number.
+    ssl_days_remaining = models.IntegerField(null=True, blank=True)
+
+    class Meta:
+        ordering = ('-checked_at', '-id')
+        indexes = [
+            # The access pattern is always "latest results for this monitor".
+            models.Index(fields=['monitor', '-checked_at'], name='checkresult_monitor_time'),
+            # Supports scanning recent failures across all monitors.
+            models.Index(fields=['is_success', '-checked_at'], name='checkresult_success_time'),
+        ]
+
+    def __str__(self):
+        outcome = 'up' if self.is_success else f'down ({self.error_type})'
+        return f'{self.monitor_id} {outcome} at {self.checked_at:%Y-%m-%d %H:%M:%S}'

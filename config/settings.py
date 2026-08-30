@@ -157,6 +157,8 @@ REST_FRAMEWORK = {
         'register': '5/minute',
         'login': '5/minute',
         'token_refresh': '20/minute',
+        # Manually running a monitor triggers an outbound request.
+        'monitor_run': '10/minute',
     },
 }
 

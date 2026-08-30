@@ -5,6 +5,9 @@ from django.core.cache import cache
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from monitors.models import Monitor
+from websites.models import Website
+
 User = get_user_model()
 
 PASSWORD = 'uptora-test-pass-42'
@@ -55,3 +58,23 @@ def auth_client(user):
 @pytest.fixture
 def other_client(other_user):
     return bearer_client(other_user)
+
+
+@pytest.fixture
+def website(user):
+    return Website.objects.create(owner=user, name='Example', url='https://example.com/status')
+
+
+@pytest.fixture
+def other_website(other_user):
+    return Website.objects.create(owner=other_user, name='Theirs', url='https://theirs.example.com')
+
+
+@pytest.fixture
+def monitor(website):
+    return Monitor.objects.create(website=website)
+
+
+@pytest.fixture
+def other_monitor(other_website):
+    return Monitor.objects.create(website=other_website)
