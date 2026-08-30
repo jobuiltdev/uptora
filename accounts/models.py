@@ -7,6 +7,12 @@ class UserManager(BaseUserManager):
 
     use_in_migrations = True
 
+    @classmethod
+    def normalize_email(cls, email):
+        # Django only lowercases the domain. Uptora treats the whole address as
+        # case-insensitive so that uniqueness checks and logins agree.
+        return super().normalize_email(email).lower()
+
     def _create_user(self, email, password, **extra_fields):
         if not email:
             raise ValueError('Users must have an email address.')

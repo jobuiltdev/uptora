@@ -8,6 +8,9 @@ class HealthView(APIView):
 
     authentication_classes = []
     permission_classes = [AllowAny]
+    # A liveness probe is polled on a fixed schedule; rate limiting it would
+    # only ever produce false alarms.
+    throttle_classes = []
 
     def get(self, request):
         return Response({'status': 'ok'})

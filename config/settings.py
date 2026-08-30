@@ -6,6 +6,7 @@ variables, which are loaded from a local `.env` file during development.
 """
 
 import os
+from datetime import timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -46,8 +47,9 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'rest_framework_simplejwt.token_blacklist',
     'accounts',
-    'sites',
+    'websites',
     'monitors',
     'incidents',
     'notifications',
@@ -98,6 +100,22 @@ DATABASES = {
 }
 
 
+# Cache
+# https://docs.djangoproject.com/en/6.1/topics/cache/
+#
+# DRF stores throttle counters here. The local-memory backend is per-process, so
+# with several workers the effective limit is multiplied by the worker count.
+# That is acceptable for now; pointing this at Redis later makes the counters
+# shared without any change to the throttle classes or rates.
+
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'uptora-default',
+    }
+}
+
+
 # Authentication
 # https://docs.djangoproject.com/en/6.1/topics/auth/customizing/
 
@@ -124,11 +142,36 @@ AUTH_PASSWORD_VALIDATORS = [
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.SessionAuthentication',
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
+    # General ceiling for ordinary API traffic. Views that need a tighter limit
+    # opt in to ScopedRateThrottle with a scope from DEFAULT_THROTTLE_RATES.
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.UserRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'user': '120/minute',
+        'register': '5/minute',
+        'login': '5/minute',
+        'token_refresh': '20/minute',
+    },
+}
+
+
+# Simple JWT
+# https://django-rest-framework-simplejwt.readthedocs.io/en/latest/settings.html
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    # Each refresh issues a new refresh token and blacklists the one used, so a
+    # stolen refresh token is only usable until the legitimate client refreshes.
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'UPDATE_LAST_LOGIN': True,
 }
 
 
