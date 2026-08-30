@@ -1,0 +1,9 @@
+Django==6.1
+djangorestframework==3.18.0
+psycopg[binary]==3.3.4
+python-dotenv==1.2.3
+
+# Development / tooling
+pytest==9.1.1
+pytest-django==4.14.0
+ruff==0.16.5
