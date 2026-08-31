@@ -30,6 +30,7 @@ Linux/macOS (and production):
 ```
 celery -A config worker -Q http --concurrency=8
 celery -A config worker -Q browser --concurrency=2
+celery -A config worker -Q notifications --concurrency=4
 celery -A config beat
 ```
 
@@ -40,6 +41,7 @@ is shaped around this:
 ```
 celery -A config worker -Q http --pool=solo
 celery -A config worker -Q browser --pool=solo
+celery -A config worker -Q notifications --pool=solo
 celery -A config beat
 ```
 

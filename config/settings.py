@@ -195,6 +195,25 @@ USE_TZ = True
 STATIC_URL = 'static/'
 
 
+# Notifications
+# https://resend.com/docs
+#
+# The provider is chosen from configuration, never hard-wired into business
+# logic. Without an API key, development uses the console provider, which logs
+# and returns a message id marked `console:` -- deliberately not a silent
+# no-op that would look like production delivery in the delivery record.
+
+RESEND_API_KEY = os.getenv('RESEND_API_KEY', '')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'Uptora <alerts@uptora.example>')
+APP_BASE_URL = os.getenv('APP_BASE_URL', 'http://localhost:8000')
+
+NOTIFICATIONS_EMAIL_PROVIDER = os.getenv('NOTIFICATIONS_EMAIL_PROVIDER', '') or (
+    'notifications.email.factories.resend_provider'
+    if RESEND_API_KEY
+    else 'notifications.email.factories.console_provider'
+)
+
+
 # Celery
 # https://docs.celeryq.dev/en/stable/django/first-steps-with-django.html
 #
@@ -214,7 +233,7 @@ CELERY_TASK_DEFAULT_QUEUE = 'http'
 # Browser and flow work is routed to its own queue by the dispatcher, so an
 # operator can run that worker at low concurrency and cap how many Chromium
 # processes exist at once.
-CELERY_TASK_QUEUES_DOCUMENTED = ('http', 'browser')
+CELERY_TASK_QUEUES_DOCUMENTED = ('http', 'browser', 'notifications')
 
 CELERY_TASK_ACKS_LATE = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
@@ -223,11 +242,21 @@ CELERY_TIMEZONE = 'UTC'
 
 DISPATCH_INTERVAL_SECONDS = int(os.getenv('UPTORA_DISPATCH_INTERVAL_SECONDS', '30'))
 
+NOTIFICATION_DISPATCH_INTERVAL_SECONDS = int(
+    os.getenv('UPTORA_NOTIFICATION_DISPATCH_INTERVAL_SECONDS', '60')
+)
+
 CELERY_BEAT_SCHEDULE = {
     'dispatch-due-monitors': {
         'task': 'monitors.dispatch_due_monitors',
         'schedule': DISPATCH_INTERVAL_SECONDS,
-    }
+    },
+    # Safety net: normally a delivery is enqueued the moment its event commits,
+    # but a broker that was down at that instant would otherwise lose the email.
+    'dispatch-pending-notifications': {
+        'task': 'notifications.dispatch_pending_notifications',
+        'schedule': NOTIFICATION_DISPATCH_INTERVAL_SECONDS,
+    },
 }
 
 

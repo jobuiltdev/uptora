@@ -33,6 +33,7 @@ from django.utils import timezone
 
 from incidents.models import Incident, IncidentStatus
 from monitors.models import CheckResult, ErrorType, Monitor
+from notifications.services import record_incident_transitions
 
 # How many consecutive results it takes to confirm a state change.
 #
@@ -203,7 +204,13 @@ def reconcile(monitor_id, states, since):
     Incidents starting at or after `since` are the fold's responsibility;
     anything earlier is settled history and is not touched. Matching by position
     keeps an existing incident's id stable, so a row the API has already handed
-    out does not turn into a different one.
+    out does not turn into a different one -- and so a notification already sent
+    for it is recognisably the same incident on the next replay.
+
+    Returns (incident, previous_status) for every incident that survives, with
+    previous_status None for one just created. That is the only place the
+    engine says what actually changed, and it is what notifications are built
+    from.
     """
     existing = list(
         Incident.objects.filter(monitor_id=monitor_id, started_at__gte=since).order_by(
@@ -211,20 +218,30 @@ def reconcile(monitor_id, states, since):
         )
     )
 
+    transitions = []
     for index, state in enumerate(states):
         if index < len(existing):
             incident = existing[index]
+            previous_status = incident.status
             for name, value in state_values(state).items():
                 setattr(incident, name, value)
             incident.save(update_fields=[*DERIVED_FIELDS, 'updated_at'])
         else:
-            Incident.objects.create(monitor_id=monitor_id, **state_values(state))
+            incident = Incident.objects.create(monitor_id=monitor_id, **state_values(state))
+            previous_status = None
+        transitions.append((incident, previous_status))
 
     # An incident the ordered stream says never happened, e.g. one opened from
     # two failures that a late-arriving success now sits between. Only reachable
     # for rows the fold owns, and never for settled history.
+    #
+    # These are not in `transitions`, so a withdrawn incident announces nothing.
+    # An incident created and withdrawn in the same pass cannot occur: only rows
+    # that existed before this pass are ever deleted by it.
     for spurious in existing[len(states) :]:
         spurious.delete()
+
+    return transitions
 
 
 @transaction.atomic
@@ -247,7 +264,12 @@ def process_check_result(check_result):
     window = results_after(monitor_id, cursor)
 
     if window:
-        reconcile(monitor_id, fold(window), since=window[0].checked_at)
+        transitions = reconcile(monitor_id, fold(window), since=window[0].checked_at)
+        # The single integration point for notifications. It runs inside this
+        # transaction, so a transition that rolls back takes its notification
+        # with it, and it is driven by incident state alone -- a manual run and
+        # a scheduled one are indistinguishable from here.
+        record_incident_transitions(transitions)
 
     stamp_processed(check_result)
     return open_incident_for(monitor_id)
