@@ -114,7 +114,7 @@ class TestBrowserMonitorApi:
         browser_monitor.refresh_from_db()
         assert browser_monitor.expected_selector == '#loaded'
 
-    @pytest.mark.parametrize('monitor_type', ['FLOW', 'PING', 'browser', 'CHROME'])
+    @pytest.mark.parametrize('monitor_type', ['PING', 'browser', 'CHROME', 'SCREENSHOT'])
     def test_unknown_monitor_types_are_still_rejected(self, auth_client, website, monitor_type):
         response = auth_client.post(
             reverse(LIST_URL), payload(website, monitor_type=monitor_type), format='json'

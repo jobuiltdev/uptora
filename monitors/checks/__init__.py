@@ -7,13 +7,15 @@ adding a module here and one branch in run_check.
 
 from monitors.checks.base import CheckOutcome, summarize
 from monitors.checks.browser import run_browser_check
+from monitors.checks.flow import FlowConfigurationError, build_plan, run_flow_check
 from monitors.checks.http import run_http_check
-from monitors.models import MonitorType
+from monitors.models import ErrorType, MonitorType
 
 __all__ = [
     'CheckOutcome',
     'run_browser_check',
     'run_check',
+    'run_flow_check',
     'run_http_check',
     'summarize',
 ]
@@ -47,6 +49,21 @@ def run_check(monitor, now, transport=None, session_factory=None):
             # them populated on one changes nothing.
             expected_text=monitor.expected_text,
             expected_selector=monitor.expected_selector,
+            session_factory=session_factory,
+        )
+
+    if monitor.monitor_type == MonitorType.FLOW:
+        try:
+            plan = build_plan(monitor)
+        except FlowConfigurationError as exc:
+            # A misconfigured flow is a failed check, not a crashed runner, and
+            # it is named precisely rather than lumped in with browser errors.
+            return CheckOutcome.failure(ErrorType.FLOW_CONFIGURATION_ERROR, exc)
+        return run_flow_check(
+            url=monitor.website.url,
+            timeout_seconds=monitor.timeout_seconds,
+            now=now,
+            plan=plan,
             session_factory=session_factory,
         )
 

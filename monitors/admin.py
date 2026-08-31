@@ -1,6 +1,18 @@
 from django.contrib import admin
 
-from monitors.models import CheckResult, Monitor
+from monitors.models import CheckResult, FlowConfig, FlowField, Monitor
+
+
+class FlowFieldInline(admin.TabularInline):
+    model = FlowField
+    extra = 0
+
+
+@admin.register(FlowConfig)
+class FlowConfigAdmin(admin.ModelAdmin):
+    list_display = ('monitor', 'flow_kind', 'submit_selector')
+    list_filter = ('flow_kind',)
+    inlines = [FlowFieldInline]
 
 
 @admin.register(Monitor)

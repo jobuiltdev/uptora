@@ -47,6 +47,7 @@ class MonitorViewSet(viewsets.ModelViewSet):
             Monitor.objects.filter(website__owner=self.request.user)
             .select_related('website')
             .annotate(has_open_incident=Exists(open_incidents))
+            .prefetch_related('flow_config__fields')
         )
 
     def get_throttles(self):

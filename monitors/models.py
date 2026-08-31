@@ -24,12 +24,13 @@ DEFAULT_TIMEOUT_SECONDS = 10
 class MonitorType(models.TextChoices):
     """Kinds of check Uptora can run.
 
-    FLOW joins these when user-flow monitoring lands; the API rejects anything
-    not listed, so a new member is the single place that has to change.
+    The API rejects anything not listed, so a new member is the single place
+    that has to change.
     """
 
     HTTP = 'HTTP', 'HTTP'
     BROWSER = 'BROWSER', 'Browser'
+    FLOW = 'FLOW', 'Flow'
 
 
 class ErrorType(models.TextChoices):
@@ -55,7 +56,51 @@ class ErrorType(models.TextChoices):
     EXPECTED_SELECTOR_MISSING = 'EXPECTED_SELECTOR_MISSING', 'Expected selector missing'
     BROWSER_ERROR = 'BROWSER_ERROR', 'Browser error'
 
+    # User flows. Each names the step that failed, so an operator can tell a
+    # broken form apart from a broken page without opening the screenshot.
+    FLOW_CONFIGURATION_ERROR = 'FLOW_CONFIGURATION_ERROR', 'Flow configuration error'
+    FLOW_FIELD_NOT_FOUND = 'FLOW_FIELD_NOT_FOUND', 'Flow field not found'
+    FLOW_FIELD_INTERACTION_ERROR = 'FLOW_FIELD_INTERACTION_ERROR', 'Flow field interaction error'
+    FLOW_SUBMIT_NOT_FOUND = 'FLOW_SUBMIT_NOT_FOUND', 'Flow submit control not found'
+    FLOW_SUBMIT_ERROR = 'FLOW_SUBMIT_ERROR', 'Flow submit error'
+    FLOW_TIMEOUT = 'FLOW_TIMEOUT', 'Flow timeout'
+    FLOW_SUCCESS_TEXT_MISSING = 'FLOW_SUCCESS_TEXT_MISSING', 'Flow success text missing'
+    FLOW_SUCCESS_SELECTOR_MISSING = (
+        'FLOW_SUCCESS_SELECTOR_MISSING',
+        'Flow success selector missing',
+    )
+    FLOW_SUCCESS_URL_MISMATCH = 'FLOW_SUCCESS_URL_MISMATCH', 'Flow success URL mismatch'
+    FLOW_DESTINATION_NOT_ALLOWED = (
+        'FLOW_DESTINATION_NOT_ALLOWED',
+        'Flow submission destination not allowed',
+    )
+
     UNKNOWN_ERROR = 'UNKNOWN_ERROR', 'Unknown error'
+
+
+class FlowKind(models.TextChoices):
+    """Which user journey a FLOW monitor walks.
+
+    Only the contact form exists today. LOGIN, SEARCH and the rest join this
+    enum with their own plan builder and executor under checks/flows/; nothing
+    in the monitoring engine has to change to admit one.
+    """
+
+    CONTACT_FORM = 'CONTACT_FORM', 'Contact form'
+
+
+class FlowFieldType(models.TextChoices):
+    """How a configured value is applied to a control.
+
+    A closed set of declarative actions. There is deliberately no member that
+    runs script: a flow describes what to type where, never what to execute.
+    """
+
+    TEXT = 'TEXT', 'Text'
+    EMAIL = 'EMAIL', 'Email'
+    TEXTAREA = 'TEXTAREA', 'Textarea'
+    CHECKBOX = 'CHECKBOX', 'Checkbox'
+    SELECT = 'SELECT', 'Select'
 
 
 class Monitor(models.Model):
@@ -180,3 +225,86 @@ class CheckResult(models.Model):
     def __str__(self):
         outcome = 'up' if self.is_success else f'down ({self.error_type})'
         return f'{self.monitor_id} {outcome} at {self.checked_at:%Y-%m-%d %H:%M:%S}'
+
+
+class FlowConfig(models.Model):
+    """Declarative configuration for a FLOW monitor.
+
+    Relational columns rather than a JSON document: the fields are few, fixed
+    and queryable, and a schema change is a visible migration. Nothing here can
+    describe code, and nothing here names a destination -- see below.
+
+    Anti-abuse: there is deliberately no url or action column. A flow always
+    navigates to its website's own URL and submits whatever form that page
+    contains, so configuration cannot aim Uptora at an arbitrary endpoint. The
+    monitored site's own HTML decides where its form posts, exactly as it would
+    for a human visitor. Without that constraint this model would be a
+    programmable request sender.
+
+    Values are treated as potentially sensitive: they are never written into a
+    CheckResult message or diagnostics. See FlowField.value.
+    """
+
+    monitor = models.OneToOneField(
+        Monitor,
+        on_delete=models.CASCADE,
+        related_name='flow_config',
+    )
+    flow_kind = models.CharField(max_length=32, choices=FlowKind.choices)
+
+    submit_selector = models.CharField(max_length=500)
+
+    # Success assertions. All configured ones must hold; at least one must be
+    # set, enforced below. A form that was submitted with nothing checked
+    # afterwards proves only that a button was clickable.
+    success_text = models.CharField(max_length=200, null=True, blank=True)
+    success_selector = models.CharField(max_length=500, null=True, blank=True)
+    success_url_contains = models.CharField(max_length=500, null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(success_text__isnull=False)
+                    | models.Q(success_selector__isnull=False)
+                    | models.Q(success_url_contains__isnull=False)
+                ),
+                name='flowconfig_requires_a_success_assertion',
+            )
+        ]
+
+    def __str__(self):
+        return f'{self.get_flow_kind_display()} flow for monitor {self.monitor_id}'
+
+
+class FlowField(models.Model):
+    """One control a flow fills in, and what to put in it."""
+
+    flow_config = models.ForeignKey(
+        FlowConfig,
+        on_delete=models.CASCADE,
+        related_name='fields',
+    )
+    selector = models.CharField(max_length=500)
+    field_type = models.CharField(
+        max_length=16,
+        choices=FlowFieldType.choices,
+        default=FlowFieldType.TEXT,
+    )
+    # Potentially sensitive. Readable by the owner through the API, but never
+    # copied into an error message, diagnostics or incident metadata: a failure
+    # names the selector it could not fill, never what it was going to type.
+    # When login and payment flows arrive, this is the column that moves behind
+    # encryption or a secret store; keeping it isolated here is what makes that
+    # a contained change.
+    value = models.CharField(max_length=1000, blank=True)
+    position = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ('position', 'id')
+
+    def __str__(self):
+        return f'{self.field_type} {self.selector}'

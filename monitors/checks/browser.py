@@ -76,6 +76,14 @@ class BrowserFailure(Exception):
     """The browser itself misbehaved: launch failed, page crashed, protocol error."""
 
 
+class ElementNotFound(Exception):
+    """A selector matched nothing within the budget."""
+
+
+class InteractionFailed(Exception):
+    """The element was there but could not be filled, checked or clicked."""
+
+
 @dataclass
 class Navigation:
     """What a completed navigation reported."""
@@ -210,26 +218,30 @@ def failed(session, error_type, message, elapsed_ms, **extra):
     )
 
 
-def inspect(session, url, timeout_ms, expected_text, expected_selector, elapsed_ms):
-    """Drive one loaded page to a verdict. `session` may be real or a fake."""
+def load_page(session, url, timeout_ms, elapsed_ms):
+    """Navigate and confirm the page is genuinely there.
+
+    Returns (navigation, failure). Exactly one is None. Shared by the browser
+    check and by flows, so "did the page load" means the same thing and is
+    classified the same way for both.
+    """
     try:
         navigation = session.navigate(url, timeout_ms)
     except BrowserTimeout as exc:
-        return failed(session, ErrorType.BROWSER_TIMEOUT, exc, elapsed_ms())
+        return None, failed(session, ErrorType.BROWSER_TIMEOUT, exc, elapsed_ms())
     except NavigationFailed as exc:
         error_type = classify_navigation_error(exc, getattr(session, 'diagnostics', None))
-        return failed(session, error_type, exc, elapsed_ms())
+        return None, failed(session, error_type, exc, elapsed_ms())
 
     navigated_ms = elapsed_ms()
-    final_url = navigation.final_url
-    common = {'status_code': navigation.status, 'final_url': final_url}
+    common = {'status_code': navigation.status, 'final_url': navigation.final_url}
 
     # Defence in depth: whatever the route gate did, the page must not have
     # come to rest somewhere private.
-    if final_url:
-        allowed, reason = request_allowed(final_url)
+    if navigation.final_url:
+        allowed, reason = request_allowed(navigation.final_url)
         if not allowed:
-            return failed(
+            return None, failed(
                 session,
                 ErrorType.BLOCKED_TARGET,
                 f'Navigation ended at a blocked target: {reason}',
@@ -238,13 +250,24 @@ def inspect(session, url, timeout_ms, expected_text, expected_selector, elapsed_
             )
 
     if navigation.status is not None and navigation.status >= SUCCESS_STATUS_CEILING:
-        return failed(
+        return None, failed(
             session,
             ErrorType.HTTP_ERROR,
             f'HTTP {navigation.status}',
             navigated_ms,
             **common,
         )
+
+    return navigation, None
+
+
+def inspect(session, url, timeout_ms, expected_text, expected_selector, elapsed_ms):
+    """Drive one loaded page to a verdict. `session` may be real or a fake."""
+    navigation, failure = load_page(session, url, timeout_ms, elapsed_ms)
+    if failure is not None:
+        return failure
+
+    common = {'status_code': navigation.status, 'final_url': navigation.final_url}
 
     if expected_text and not session.has_text(expected_text):
         return failed(

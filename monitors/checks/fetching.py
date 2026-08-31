@@ -22,8 +22,14 @@ MAX_REDIRECTS = 5
 REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 
 # Redirects that must be replayed with the original method and body. The rest
-# degrade to GET, which is what a browser and a plain HTTP client both do.
+# degrade to GET, matching what a browser does with a form POST: 303 by
+# specification, 301 and 302 by universal practice.
 METHOD_PRESERVING_REDIRECTS = frozenset({307, 308})
+
+# Headers that describe a request body. When a redirect drops the body they
+# have to go with it, or the next hop is told it is sending form data it no
+# longer has.
+ENTITY_HEADERS = frozenset({'content-type', 'content-length'})
 
 # Headers we set ourselves or that describe a connection we are replacing.
 # Forwarding these from an intercepted request would either lie to the origin or
@@ -100,13 +106,14 @@ def fetch_validated(
     current_url = url
     current_method = method
     current_content = content
+    current_headers = dict(headers or {})
 
     for _ in range(max_redirects + 1):
         # Resolution and validation happen here, and the request built from this
         # target can only reach the address that just passed.
         target = resolve_target(current_url)
         request = build_pinned_request(
-            current_method, current_url, target, headers=headers, content=current_content
+            current_method, current_url, target, headers=current_headers, content=current_content
         )
         response = client.send(request)
 
@@ -116,6 +123,11 @@ def fetch_validated(
             if response.status_code not in METHOD_PRESERVING_REDIRECTS:
                 current_method = 'GET'
                 current_content = None
+                current_headers = {
+                    name: value
+                    for name, value in current_headers.items()
+                    if name.lower() not in ENTITY_HEADERS
+                }
             continue
 
         return FetchResult(response=response, target=target, final_url=current_url)
