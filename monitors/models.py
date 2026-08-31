@@ -1,4 +1,6 @@
 import secrets
+import uuid
+from datetime import timedelta
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
@@ -145,6 +147,16 @@ class Monitor(models.Model):
     expected_text = models.CharField(max_length=200, null=True, blank=True)
     expected_selector = models.CharField(max_length=200, null=True, blank=True)
 
+    # Scheduling. The database is the source of truth for when a monitor is
+    # next due: Celery Beat only runs the dispatcher, never a per-monitor
+    # entry, so nothing has to be kept in sync with a broker.
+    #
+    # Null means "not scheduled", which is exactly what a disabled monitor is.
+    # The dispatcher filters on this, so disabling removes a monitor from the
+    # schedule by data rather than by remembering to check a flag.
+    next_check_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    last_scheduled_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -158,6 +170,77 @@ class Monitor(models.Model):
     def owner(self):
         """Convenience accessor. The website is the single source of ownership."""
         return self.website.owner
+
+    @classmethod
+    def from_db(cls, db, field_names, values, **kwargs):
+        """Remember what was loaded, so save() can see what actually changed.
+
+        Only fields that were actually selected are remembered. Touching a
+        deferred one here would trigger a lazy refetch, which loads the model
+        again and re-enters this hook -- the cascade-delete collector selects
+        just the primary key, so that recursion is reachable in ordinary use.
+
+        **kwargs is forwarded rather than enumerated: Django adds keywords to
+        this hook between versions, and swallowing them silently breaks every
+        query on the model.
+        """
+        instance = super().from_db(db, field_names, values, **kwargs)
+        loaded = set(field_names)
+        if 'is_enabled' in loaded:
+            instance._loaded_is_enabled = instance.is_enabled
+        if 'interval_seconds' in loaded:
+            instance._loaded_interval_seconds = instance.interval_seconds
+        return instance
+
+    def apply_schedule(self, now=None):
+        """Bring next_check_at in line with this monitor's settings.
+
+        The rules, in order:
+
+          * disabled          -> unscheduled. A disabled monitor is simply not
+                                 in the dispatcher's queryset.
+          * newly created     -> due now, so a user sees a result shortly after
+                                 creating a monitor rather than one interval
+                                 later. Creation itself never runs a check.
+          * just re-enabled   -> due now, same reasoning.
+          * interval changed  -> now + the new interval. Deliberately simple:
+                                 the alternative, re-deriving from the old
+                                 schedule, is harder to explain and no more
+                                 correct.
+          * enabled but never -> due now. Covers rows that predate scheduling.
+            scheduled
+
+        Returns the field names it changed, so a save() with update_fields does
+        not silently drop them.
+        """
+        now = now or timezone.now()
+        previous = getattr(self, '_loaded_is_enabled', None)
+        previous_interval = getattr(self, '_loaded_interval_seconds', None)
+
+        if not self.is_enabled:
+            changed = self.next_check_at is not None
+            self.next_check_at = None
+            return {'next_check_at'} if changed else set()
+
+        if self.pk is None or previous is False:
+            self.next_check_at = now
+        elif previous_interval is not None and previous_interval != self.interval_seconds:
+            self.next_check_at = now + timedelta(seconds=self.interval_seconds)
+        elif self.next_check_at is None:
+            self.next_check_at = now
+        else:
+            return set()
+
+        return {'next_check_at'}
+
+    def save(self, *args, **kwargs):
+        touched = self.apply_schedule()
+        update_fields = kwargs.get('update_fields')
+        if touched and update_fields is not None:
+            kwargs['update_fields'] = set(update_fields) | touched
+        super().save(*args, **kwargs)
+        self._loaded_is_enabled = self.is_enabled
+        self._loaded_interval_seconds = self.interval_seconds
 
 
 def screenshot_path(instance, filename):
@@ -308,3 +391,106 @@ class FlowField(models.Model):
 
     def __str__(self):
         return f'{self.field_type} {self.selector}'
+
+
+class RunStatus(models.TextChoices):
+    """Where a scheduled execution got to.
+
+    Operational states, not product states. A run failing internally says
+    something about Uptora; only a CheckResult says anything about the
+    customer's site.
+    """
+
+    PENDING = 'PENDING', 'Pending'
+    RUNNING = 'RUNNING', 'Running'
+    COMPLETED = 'COMPLETED', 'Completed'
+    FAILED_INTERNAL = 'FAILED_INTERNAL', 'Failed internally'
+    CANCELLED = 'CANCELLED', 'Cancelled'
+
+
+# States from which nothing further will happen.
+TERMINAL_RUN_STATUSES = frozenset({RunStatus.COMPLETED, RunStatus.CANCELLED})
+
+
+class MonitorRun(models.Model):
+    """One scheduled execution of a monitor.
+
+    Deliberately separate from CheckResult. A CheckResult is an observation of
+    somebody's website; a MonitorRun is Uptora's own record of trying to make
+    one. Merging them would mean a broker outage or a worker crash looked like
+    a customer outage, which is precisely the confusion this milestone exists
+    to avoid.
+
+    Celery delivers at least once, so this row -- not the message -- is the
+    unit of work. `scheduled_for` names the slot and is unique per monitor, so
+    two dispatchers racing over the same due time can only ever produce one
+    run.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    monitor = models.ForeignKey(
+        Monitor,
+        on_delete=models.CASCADE,
+        related_name='runs',
+    )
+    # The due time this run belongs to, not the time it happened to start.
+    # Deterministic, which is what makes the uniqueness rule meaningful.
+    scheduled_for = models.DateTimeField()
+    status = models.CharField(max_length=20, choices=RunStatus.choices, default=RunStatus.PENDING)
+
+    # The lease. A worker may only act on a run while it holds the current
+    # token and the lease has not expired, so a duplicate delivery arriving
+    # mid-execution steps aside instead of running the check a second time.
+    claim_token = models.UUIDField(null=True, blank=True, editable=False)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    # Set in the same transaction that writes the CheckResult, so a crash can
+    # never leave an observation that this run does not know it already made.
+    check_result = models.ForeignKey(
+        CheckResult,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='runs',
+    )
+    attempt_count = models.PositiveIntegerField(default=0)
+    # When a dispatcher last re-enqueued this run after finding its lease
+    # abandoned. Purely a debounce, so successive scans do not keep sending
+    # messages for a run whose message is still sitting in the queue.
+    #
+    # Deliberately not the lease: pushing lease_expires_at forward would make
+    # the recovered worker see a live lease and stand down, which would stall
+    # recovery rather than assist it.
+    recovery_enqueued_at = models.DateTimeField(null=True, blank=True)
+    # Why Uptora failed, never why the target did. Capped like error_message.
+    internal_error = models.CharField(max_length=500, null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ('-scheduled_for', '-created_at')
+        constraints = [
+            # The whole scheduling design rests on this: one run per monitor
+            # per slot, enforced by the database rather than by the dispatcher
+            # being careful.
+            models.UniqueConstraint(
+                fields=['monitor', 'scheduled_for'],
+                name='monitorrun_unique_slot',
+            )
+        ]
+        indexes = [
+            models.Index(fields=['status', 'scheduled_for'], name='monitorrun_status_slot'),
+            models.Index(fields=['monitor', '-scheduled_for'], name='monitorrun_monitor_slot'),
+        ]
+
+    def __str__(self):
+        slot = f'{self.scheduled_for:%Y-%m-%d %H:%M}'
+        return f'{self.status} run of monitor {self.monitor_id} for {slot}'
+
+    def lease_is_live(self, now):
+        return self.lease_expires_at is not None and self.lease_expires_at > now

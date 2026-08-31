@@ -1,4 +1,4 @@
-from django.db.models import Exists, OuterRef
+from django.db.models import Exists, Max, OuterRef
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import APIException
@@ -46,7 +46,10 @@ class MonitorViewSet(viewsets.ModelViewSet):
         return (
             Monitor.objects.filter(website__owner=self.request.user)
             .select_related('website')
-            .annotate(has_open_incident=Exists(open_incidents))
+            .annotate(
+                has_open_incident=Exists(open_incidents),
+                last_check_at=Max('results__checked_at'),
+            )
             .prefetch_related('flow_config__fields')
         )
 

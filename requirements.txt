@@ -1,3 +1,4 @@
+celery[redis]==5.6.3
 Django==6.1
 httpx==0.28.1
 djangorestframework==3.18.0
@@ -14,3 +15,6 @@ ruff==0.16.5
 # Browser monitoring needs the Chromium build too, which pip does not
 # install. After pip install, run:
 #     playwright install chromium
+#
+# Background scheduling needs a Redis broker. See docs/scheduling.md for
+# local setup and worker commands.

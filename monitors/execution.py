@@ -50,26 +50,34 @@ def attach_screenshot(check_result, data):
         pass
 
 
-def record_check(monitor, transport=None, session_factory=None):
-    """Stage 1. Run the check for `monitor` and persist exactly one CheckResult.
+def observe(monitor, transport=None, session_factory=None):
+    """Stage 1a. Touch the network and describe what was seen.
 
-    The only function in the pipeline that touches the network, and the only one
-    that creates a CheckResult. Every path through it writes exactly one row: a
-    target that is broken, hostile or unreachable still produces a record,
-    because "no data" and "the site is down" must never look the same in the
-    history.
+    Writes nothing. Split out from persistence so a caller that needs the
+    observation and some bookkeeping to commit together can open its
+    transaction *after* the request rather than around it.
 
-    `transport` is a test seam handed through to the HTTP check.
+    Returns (outcome, started_at). Never raises for anything the target does: a
+    site that is broken, hostile or unreachable still yields an outcome,
+    because "no data" and "the site is down" must never look the same.
+
+    `transport` and `session_factory` are the per-type test seams.
     """
     started_at = timezone.now()
-
     try:
         outcome = run_check(
             monitor, now=started_at, transport=transport, session_factory=session_factory
         )
     except Exception as exc:  # noqa: BLE001 - a bad target must not kill the runner
         outcome = CheckOutcome.failure(ErrorType.UNKNOWN_ERROR, summarize(exc))
+    return outcome, started_at
 
+
+def persist_observation(monitor, outcome, started_at):
+    """Stage 1b. Write exactly one CheckResult for an observation.
+
+    Touches no network, so it is safe inside a transaction.
+    """
     result = CheckResult.objects.create(
         monitor=monitor,
         checked_at=started_at,
@@ -78,6 +86,17 @@ def record_check(monitor, transport=None, session_factory=None):
     if outcome.screenshot:
         attach_screenshot(result, outcome.screenshot)
     return result
+
+
+def record_check(monitor, transport=None, session_factory=None):
+    """Stage 1. Run the check for `monitor` and persist exactly one CheckResult.
+
+    The only function in the pipeline that both touches the network and creates
+    a CheckResult. Composed of the two halves above; the scheduled path uses
+    them separately so the result and its run linkage commit together.
+    """
+    outcome, started_at = observe(monitor, transport=transport, session_factory=session_factory)
+    return persist_observation(monitor, outcome, started_at)
 
 
 def process_recorded_result(check_result_id):

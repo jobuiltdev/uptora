@@ -123,6 +123,7 @@ class MonitorSerializer(serializers.ModelSerializer):
     website = OwnedWebsiteField()
     has_open_incident = serializers.SerializerMethodField()
     flow_config = FlowConfigSerializer(required=False, allow_null=True)
+    last_check_at = serializers.SerializerMethodField()
 
     class Meta:
         model = Monitor
@@ -137,10 +138,15 @@ class MonitorSerializer(serializers.ModelSerializer):
             'expected_selector',
             'flow_config',
             'has_open_incident',
+            'next_check_at',
+            'last_check_at',
             'created_at',
             'updated_at',
         )
-        read_only_fields = ('id', 'created_at', 'updated_at')
+        # next_check_at is the scheduler's, not the client's: it is set by the
+        # monitor's own rules and advanced by the dispatcher. The lease token
+        # and run history are internal and are not exposed at all.
+        read_only_fields = ('id', 'next_check_at', 'created_at', 'updated_at')
 
     def get_has_open_incident(self, monitor):
         """Whether this monitor is currently down.
@@ -156,6 +162,19 @@ class MonitorSerializer(serializers.ModelSerializer):
         if annotated is not None:
             return annotated
         return Incident.objects.filter(monitor=monitor, status=IncidentStatus.OPEN).exists()
+
+    def get_last_check_at(self, monitor):
+        """When this monitor was last observed.
+
+        Derived from the check history rather than stored again on Monitor, so
+        there is no second copy of the truth to fall out of step. The list and
+        detail views annotate it; anything else falls back to one query.
+        """
+        annotated = getattr(monitor, 'last_check_at', None)
+        if annotated is not None:
+            return annotated
+        latest = monitor.results.order_by('-checked_at').values_list('checked_at', flat=True)
+        return latest.first()
 
     def existing_config(self):
         if self.instance is None:

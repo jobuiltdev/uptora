@@ -195,6 +195,42 @@ USE_TZ = True
 STATIC_URL = 'static/'
 
 
+# Celery
+# https://docs.celeryq.dev/en/stable/django/first-steps-with-django.html
+#
+# Redis is the broker. Results are not stored: nothing in the product reads a
+# task return value, and MonitorRun already records what happened in a form
+# that outlives any broker.
+#
+# Beat carries exactly one entry. Per-monitor timing lives in the monitors
+# table, so a monitor being created, disabled or retimed never has to be
+# reflected into broker state.
+
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = None
+CELERY_TASK_IGNORE_RESULT = True
+
+CELERY_TASK_DEFAULT_QUEUE = 'http'
+# Browser and flow work is routed to its own queue by the dispatcher, so an
+# operator can run that worker at low concurrency and cap how many Chromium
+# processes exist at once.
+CELERY_TASK_QUEUES_DOCUMENTED = ('http', 'browser')
+
+CELERY_TASK_ACKS_LATE = True
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_TIMEZONE = 'UTC'
+
+DISPATCH_INTERVAL_SECONDS = int(os.getenv('UPTORA_DISPATCH_INTERVAL_SECONDS', '30'))
+
+CELERY_BEAT_SCHEDULE = {
+    'dispatch-due-monitors': {
+        'task': 'monitors.dispatch_due_monitors',
+        'schedule': DISPATCH_INTERVAL_SECONDS,
+    }
+}
+
+
 # Media files
 # https://docs.djangoproject.com/en/6.1/topics/files/
 #
