@@ -1,8 +1,8 @@
 """Celery application.
 
-One periodic entry only -- the dispatcher. Per-monitor schedules live in the
-database, never in the broker, so nothing has to be reconciled between the two
-when a monitor is created, disabled or retimed.
+Two global periodic dispatchers are configured: one for due monitors and one
+notification safety net. Per-resource schedules live in the database, never
+as one Beat entry per monitor or delivery.
 """
 
 import os

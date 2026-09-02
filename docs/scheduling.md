@@ -2,7 +2,9 @@
 
 Enabled monitors run automatically at their configured interval through Celery
 with a Redis broker. The database is the source of truth for what is due;
-Celery Beat carries exactly one periodic entry, the dispatcher.
+Celery Beat carries two global periodic entries: the monitor dispatcher and the
+notification delivery safety-net dispatcher. There is never one Beat entry per
+monitor or notification delivery.
 
 ## Running it locally
 

@@ -6,6 +6,7 @@
 # Virtual environments
 venv/
 .venv/
+.venv-codex/
 env/
 ENV/
 

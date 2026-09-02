@@ -1,14 +1,17 @@
 from django.db.models import Exists, Max, OuterRef
+from django.http import FileResponse, Http404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import APIException
+from rest_framework.exceptions import APIException, ValidationError
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
+from rest_framework.views import APIView
 
 from incidents.models import Incident, IncidentStatus
 from monitors.execution import execute_monitor
-from monitors.models import Monitor
+from monitors.models import CheckResult, Monitor
 from monitors.serializers import CheckResultSerializer, MonitorSerializer
 
 
@@ -43,7 +46,7 @@ class MonitorViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         open_incidents = Incident.objects.filter(monitor=OuterRef('pk'), status=IncidentStatus.OPEN)
-        return (
+        queryset = (
             Monitor.objects.filter(website__owner=self.request.user)
             .select_related('website')
             .annotate(
@@ -52,6 +55,14 @@ class MonitorViewSet(viewsets.ModelViewSet):
             )
             .prefetch_related('flow_config__fields')
         )
+        website_id = self.request.query_params.get('website')
+        if website_id is not None:
+            try:
+                website_id = int(website_id)
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({'website': ['Must be an integer id.']}) from exc
+            queryset = queryset.filter(website_id=website_id)
+        return queryset
 
     def get_throttles(self):
         # Running a monitor makes an outbound request on demand, so it gets a
@@ -85,3 +96,33 @@ class MonitorViewSet(viewsets.ModelViewSet):
         page = paginator.paginate_queryset(monitor.results.all(), request, view=self)
         serializer = CheckResultSerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
+
+
+class CheckResultEvidenceView(APIView):
+    """Stream failure evidence only to the owner of the originating monitor."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            result = CheckResult.objects.select_related('monitor__website').get(
+                pk=pk,
+                monitor__website__owner=request.user,
+            )
+        except CheckResult.DoesNotExist as exc:
+            raise Http404 from exc
+
+        if not result.screenshot:
+            raise Http404
+
+        try:
+            stream = result.screenshot.open('rb')
+        except (FileNotFoundError, OSError) as exc:
+            raise Http404 from exc
+
+        return FileResponse(
+            stream,
+            content_type='image/png',
+            as_attachment=False,
+            filename=f'uptora-evidence-{result.pk}.png',
+        )

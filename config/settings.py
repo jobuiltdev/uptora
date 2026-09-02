@@ -205,7 +205,7 @@ STATIC_URL = 'static/'
 
 RESEND_API_KEY = os.getenv('RESEND_API_KEY', '')
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'Uptora <alerts@uptora.example>')
-APP_BASE_URL = os.getenv('APP_BASE_URL', 'http://localhost:8000')
+APP_BASE_URL = os.getenv('APP_BASE_URL', 'http://localhost:3000')
 
 NOTIFICATIONS_EMAIL_PROVIDER = os.getenv('NOTIFICATIONS_EMAIL_PROVIDER', '') or (
     'notifications.email.factories.resend_provider'
@@ -221,9 +221,9 @@ NOTIFICATIONS_EMAIL_PROVIDER = os.getenv('NOTIFICATIONS_EMAIL_PROVIDER', '') or 
 # task return value, and MonitorRun already records what happened in a form
 # that outlives any broker.
 #
-# Beat carries exactly one entry. Per-monitor timing lives in the monitors
+# Beat carries two global dispatchers. Per-monitor timing lives in the monitors
 # table, so a monitor being created, disabled or retimed never has to be
-# reflected into broker state.
+# reflected into broker state, and deliveries likewise remain database-driven.
 
 CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
 CELERY_RESULT_BACKEND = None
