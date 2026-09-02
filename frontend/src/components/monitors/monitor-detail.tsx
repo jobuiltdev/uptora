@@ -142,6 +142,24 @@ export function MonitorDetail({
         </div>
       </header>
       {run.data && <RunOutcome result={run.data} />}
+      {run.isError && (
+        <section
+          className="card border-l-4 border-l-amber-600 p-5"
+          role="alert"
+        >
+          <h2 className="font-semibold">Uptora could not complete the check</h2>
+          <p className="muted mt-1 text-sm">
+            This is an internal or connectivity problem, not evidence that the
+            monitored website failed.
+          </p>
+          <button
+            className="button secondary mt-3"
+            onClick={() => run.mutate()}
+          >
+            Try again
+          </button>
+        </section>
+      )}
       <section className="grid gap-4 sm:grid-cols-3">
         <article className="card p-5">
           <p className="muted text-sm">Interval</p>

@@ -3,7 +3,12 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const ACCESS_COOKIE = "uptora_access";
 export const REFRESH_COOKIE = "uptora_refresh";
-const backend = () => process.env.DJANGO_API_URL ?? "http://localhost:8000";
+const backend = () => {
+  const configured = process.env.DJANGO_API_URL;
+  if (process.env.NODE_ENV === "production" && !configured)
+    throw new Error("DJANGO_API_URL is required in production.");
+  return configured ?? "http://localhost:8000";
+};
 const cookieBase = {
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",
@@ -12,7 +17,9 @@ const cookieBase = {
 };
 export function validMutationOrigin(request: NextRequest) {
   const origin = request.headers.get("origin");
-  const expected = process.env.NEXT_PUBLIC_APP_URL ?? request.nextUrl.origin;
+  const configured = process.env.NEXT_PUBLIC_APP_URL;
+  if (process.env.NODE_ENV === "production" && !configured) return false;
+  const expected = configured ?? request.nextUrl.origin;
   return origin === expected;
 }
 export async function setTokens(tokens: { access: string; refresh?: string }) {

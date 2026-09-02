@@ -5,11 +5,13 @@ from accounts.views import (
     LogoutView,
     MeView,
     RegisterView,
+    RegistrationStatusView,
     TokenRefreshView,
 )
 
 urlpatterns = [
     path('register/', RegisterView.as_view(), name='register'),
+    path('registration-status/', RegistrationStatusView.as_view(), name='registration-status'),
     path('login/', LoginView.as_view(), name='login'),
     path('logout/', LogoutView.as_view(), name='logout'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),

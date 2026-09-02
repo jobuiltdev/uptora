@@ -24,6 +24,7 @@ The cost is re-reading a bounded slice of history per check. See replay_cursor
 for how that slice is kept short.
 """
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -34,6 +35,8 @@ from django.utils import timezone
 from incidents.models import Incident, IncidentStatus
 from monitors.models import CheckResult, ErrorType, Monitor
 from notifications.services import record_incident_transitions
+
+logger = logging.getLogger(__name__)
 
 # How many consecutive results it takes to confirm a state change.
 #
@@ -265,6 +268,21 @@ def process_check_result(check_result):
 
     if window:
         transitions = reconcile(monitor_id, fold(window), since=window[0].checked_at)
+        for incident, previous_status in transitions:
+            if previous_status is None:
+                logger.warning(
+                    'incident opened: incident=%s monitor=%s failure_type=%s',
+                    incident.id,
+                    monitor_id,
+                    incident.failure_type,
+                )
+            elif previous_status != incident.status:
+                logger.info(
+                    'incident resolved: incident=%s monitor=%s failures=%s',
+                    incident.id,
+                    monitor_id,
+                    incident.failure_count,
+                )
         # The single integration point for notifications. It runs inside this
         # transaction, so a transition that rolls back takes its notification
         # with it, and it is driven by incident state alone -- a manual run and

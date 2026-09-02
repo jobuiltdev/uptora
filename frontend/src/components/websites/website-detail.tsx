@@ -161,6 +161,23 @@ export function WebsiteDetail({ id }: { id: string }) {
         )}
       </section>
       {run.data && <RunOutcome result={run.data} />}
+      {run.isError && (
+        <section
+          className="card border-l-4 border-l-amber-600 p-5"
+          role="alert"
+        >
+          <h2 className="font-semibold">Uptora could not complete the check</h2>
+          <p className="muted mt-1 text-sm">
+            No target failure was recorded. Retry when Uptora is available.
+          </p>
+          <button
+            className="button secondary mt-3"
+            onClick={() => run.variables && run.mutate(run.variables)}
+          >
+            Try again
+          </button>
+        </section>
+      )}
       <section className="card">
         <div className="p-5 border-b border-[#edf0ee]">
           <h2 className="font-semibold">Recent incidents</h2>

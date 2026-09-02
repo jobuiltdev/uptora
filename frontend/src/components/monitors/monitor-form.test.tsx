@@ -28,5 +28,13 @@ describe("MonitorForm", () => {
       "type",
       "password",
     );
+    const create = screen.getByRole("button", { name: "Create monitor" });
+    expect(create).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: /I understand this monitor performs real submissions/i,
+      }),
+    );
+    expect(create).toBeEnabled();
   });
 });

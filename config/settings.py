@@ -5,10 +5,12 @@ Configuration that differs between environments is read from environment
 variables, which are loaded from a local `.env` file during development.
 """
 
+import json
 import os
 from datetime import timedelta
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -21,20 +23,41 @@ def env_bool(name, default=False):
     return os.getenv(name, str(default)).strip().lower() in {'1', 'true', 'yes', 'on'}
 
 
+def env_list(name, default=''):
+    return [value.strip() for value in os.getenv(name, default).split(',') if value.strip()]
+
+
+UPTORA_ENVIRONMENT = os.getenv('UPTORA_ENVIRONMENT', 'development').strip().lower()
+IS_PRODUCTION = UPTORA_ENVIRONMENT == 'production'
+
+
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv(
-    'DJANGO_SECRET_KEY',
-    'django-insecure-local-development-only-do-not-use-in-production',
-)
+DEVELOPMENT_SECRET_KEY = 'django-insecure-local-development-only-do-not-use-in-production'
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', DEVELOPMENT_SECRET_KEY)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = env_bool('DJANGO_DEBUG', True)
+DEBUG = env_bool('DJANGO_DEBUG', not IS_PRODUCTION)
 
-ALLOWED_HOSTS = [
-    host.strip()
-    for host in os.getenv('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
-    if host.strip()
-]
+ALLOWED_HOSTS = env_list('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1')
+CSRF_TRUSTED_ORIGINS = env_list('DJANGO_CSRF_TRUSTED_ORIGINS')
+APP_BASE_URL = os.getenv('APP_BASE_URL', 'http://localhost:3000').rstrip('/')
+REGISTRATION_ENABLED = env_bool('UPTORA_REGISTRATION_ENABLED', not IS_PRODUCTION)
+READINESS_TOKEN = os.getenv('UPTORA_READINESS_TOKEN', '')
+
+TRUST_PROXY_HEADERS = env_bool('DJANGO_TRUST_PROXY_HEADERS', False)
+if TRUST_PROXY_HEADERS:
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    USE_X_FORWARDED_HOST = True
+
+SECURE_SSL_REDIRECT = env_bool('DJANGO_SECURE_SSL_REDIRECT', IS_PRODUCTION)
+SESSION_COOKIE_SECURE = env_bool('DJANGO_SESSION_COOKIE_SECURE', IS_PRODUCTION)
+CSRF_COOKIE_SECURE = env_bool('DJANGO_CSRF_COOKIE_SECURE', IS_PRODUCTION)
+SECURE_HSTS_SECONDS = int(os.getenv('DJANGO_SECURE_HSTS_SECONDS', '0'))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool('DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS', False)
+SECURE_HSTS_PRELOAD = env_bool('DJANGO_SECURE_HSTS_PRELOAD', False)
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = 'same-origin'
+X_FRAME_OPTIONS = 'DENY'
 
 
 # Application definition
@@ -205,8 +228,6 @@ STATIC_URL = 'static/'
 
 RESEND_API_KEY = os.getenv('RESEND_API_KEY', '')
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'Uptora <alerts@uptora.example>')
-APP_BASE_URL = os.getenv('APP_BASE_URL', 'http://localhost:3000')
-
 NOTIFICATIONS_EMAIL_PROVIDER = os.getenv('NOTIFICATIONS_EMAIL_PROVIDER', '') or (
     'notifications.email.factories.resend_provider'
     if RESEND_API_KEY
@@ -268,17 +289,82 @@ CELERY_BEAT_SCHEDULE = {
 # local filesystem is fine for development; serving these in production needs an
 # access-controlled view, since the media root is not behind authentication.
 
-MEDIA_ROOT = BASE_DIR / 'media'
 MEDIA_URL = 'media/'
+
+EVIDENCE_STORAGE_BACKEND = os.getenv(
+    'EVIDENCE_STORAGE_BACKEND',
+    'django.core.files.storage.FileSystemStorage',
+)
+try:
+    EVIDENCE_STORAGE_OPTIONS = json.loads(os.getenv('EVIDENCE_STORAGE_OPTIONS_JSON', '{}'))
+except json.JSONDecodeError as exc:
+    raise ImproperlyConfigured('EVIDENCE_STORAGE_OPTIONS_JSON must be valid JSON.') from exc
+if not isinstance(EVIDENCE_STORAGE_OPTIONS, dict):
+    raise ImproperlyConfigured('EVIDENCE_STORAGE_OPTIONS_JSON must contain a JSON object.')
+
+MEDIA_ROOT = Path(os.getenv('EVIDENCE_MEDIA_ROOT', str(BASE_DIR / 'media')))
+STORAGES = {
+    'default': {
+        'BACKEND': EVIDENCE_STORAGE_BACKEND,
+        'OPTIONS': EVIDENCE_STORAGE_OPTIONS,
+    },
+    'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+}
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
-# Email
-# https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
-
-MAILERS = {
-    'default': {
-        'BACKEND': 'django.core.mail.backends.console.EmailBackend',
+# Logging
+LOG_LEVEL = os.getenv('UPTORA_LOG_LEVEL', 'INFO').upper()
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'filters': {
+        'redact_capabilities': {'()': 'config.logging.RedactCapabilitiesFilter'},
     },
+    'formatters': {
+        'operational': {
+            'format': '%(asctime)s %(levelname)s %(name)s %(message)s',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'filters': ['redact_capabilities'],
+            'formatter': 'operational',
+        },
+    },
+    'root': {'handlers': ['console'], 'level': LOG_LEVEL},
 }
+
+
+def require_production(condition, message):
+    if IS_PRODUCTION and not condition:
+        raise ImproperlyConfigured(message)
+
+
+require_production(not DEBUG, 'DJANGO_DEBUG must be false in production.')
+require_production(
+    bool(SECRET_KEY) and SECRET_KEY != DEVELOPMENT_SECRET_KEY,
+    'DJANGO_SECRET_KEY must be set to a production secret.',
+)
+require_production(bool(os.getenv('DJANGO_ALLOWED_HOSTS')), 'DJANGO_ALLOWED_HOSTS is required.')
+require_production(bool(CSRF_TRUSTED_ORIGINS), 'DJANGO_CSRF_TRUSTED_ORIGINS is required.')
+require_production(APP_BASE_URL.startswith('https://'), 'APP_BASE_URL must use HTTPS.')
+require_production(bool(READINESS_TOKEN), 'UPTORA_READINESS_TOKEN is required.')
+require_production(bool(os.getenv('DB_PASSWORD')), 'DB_PASSWORD is required.')
+require_production(
+    bool(os.getenv('CELERY_BROKER_URL')),
+    'CELERY_BROKER_URL must be explicitly configured in production.',
+)
+require_production(
+    bool(RESEND_API_KEY)
+    or bool(os.getenv('NOTIFICATIONS_EMAIL_PROVIDER'))
+    or env_bool('UPTORA_ALLOW_CONSOLE_EMAIL', False),
+    'Configure production email or explicitly allow the console provider.',
+)
+require_production(
+    EVIDENCE_STORAGE_BACKEND != 'django.core.files.storage.FileSystemStorage'
+    or env_bool('UPTORA_ALLOW_LOCAL_EVIDENCE_STORAGE', False),
+    'Configure durable evidence storage or explicitly acknowledge persistent local storage.',
+)

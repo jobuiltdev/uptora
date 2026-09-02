@@ -23,6 +23,7 @@ type Values = {
   success_selector: string;
   success_url_contains: string;
   fields: Field[];
+  flow_submission_confirmed: boolean;
 };
 export function MonitorForm({
   websiteId,
@@ -48,10 +49,15 @@ export function MonitorForm({
       fields: monitor?.flow_config?.fields ?? [
         { selector: "", field_type: "TEXT", value: "", position: 0 },
       ],
+      flow_submission_confirmed: false,
     },
   });
   const fields = useFieldArray({ control: form.control, name: "fields" });
   const type = useWatch({ control: form.control, name: "monitor_type" });
+  const flowConfirmed = useWatch({
+    control: form.control,
+    name: "flow_submission_confirmed",
+  });
   const mutation = useMutation({
     mutationFn: (v: Values) => {
       const payload: Record<string, unknown> = {
@@ -100,6 +106,14 @@ export function MonitorForm({
           <option value="FLOW">Contact form</option>
         </select>
       </label>
+      <div className="rounded-xl border border-[#dce3de] bg-[#f7f9f7] p-4 text-sm">
+        {type === "HTTP" &&
+          "HTTP checks whether the server responds successfully. It does not render page JavaScript."}
+        {type === "BROWSER" &&
+          "Browser opens the rendered page and can require specific text or an element selector."}
+        {type === "FLOW" &&
+          "Contact form opens the page, fills configured fields, and submits the real form."}
+      </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="label">
           Check interval (seconds)
@@ -157,6 +171,27 @@ export function MonitorForm({
               charges, bookings, or other irreversible effects.
             </p>
           </div>
+          <label className="flex items-start gap-3 rounded-xl border border-amber-300 p-4 text-sm">
+            <input
+              className="mt-1"
+              type="checkbox"
+              {...form.register("flow_submission_confirmed", {
+                validate: (value) =>
+                  type !== "FLOW" ||
+                  value ||
+                  "Confirm real form submissions to continue.",
+              })}
+            />
+            <span>
+              <strong>
+                I understand this monitor performs real submissions.
+              </strong>
+              <span className="muted mt-1 block">
+                I have permission to test this form and the supplied values are
+                safe.
+              </span>
+            </span>
+          </label>
           <label className="label">
             Submit button selector
             <input
@@ -262,7 +297,10 @@ export function MonitorForm({
         </p>
       )}
       <div>
-        <button className="button" disabled={mutation.isPending}>
+        <button
+          className="button"
+          disabled={mutation.isPending || (type === "FLOW" && !flowConfirmed)}
+        >
           {mutation.isPending
             ? "Saving…"
             : monitor

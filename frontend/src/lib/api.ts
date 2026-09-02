@@ -6,7 +6,7 @@ export class ApiError extends Error {
     super(messageFrom(data));
   }
 }
-function messageFrom(data: unknown) {
+function messageFrom(data: unknown): string {
   if (
     data &&
     typeof data === "object" &&
@@ -14,6 +14,15 @@ function messageFrom(data: unknown) {
     typeof data.detail === "string"
   )
     return data.detail;
+  if (data && typeof data === "object") {
+    for (const value of Object.values(data)) {
+      if (Array.isArray(value) && typeof value[0] === "string") return value[0];
+      if (value && typeof value === "object") {
+        const nested = messageFrom(value);
+        if (nested !== "The request could not be completed.") return nested;
+      }
+    }
+  }
   return "The request could not be completed.";
 }
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {

@@ -6,6 +6,12 @@ from monitors.models import CheckResult, FlowConfig, FlowField, Monitor, Monitor
 class FlowFieldInline(admin.TabularInline):
     model = FlowField
     extra = 0
+    fields = ('selector', 'field_type', 'position')
+    readonly_fields = fields
+    can_delete = False
+
+    def has_add_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(FlowConfig)
@@ -13,6 +19,13 @@ class FlowConfigAdmin(admin.ModelAdmin):
     list_display = ('monitor', 'flow_kind', 'submit_selector')
     list_filter = ('flow_kind',)
     inlines = [FlowFieldInline]
+    readonly_fields = tuple(field.name for field in FlowConfig._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(Monitor)

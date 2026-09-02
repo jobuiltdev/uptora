@@ -1,5 +1,6 @@
 celery[redis]==5.6.3
 Django==6.1
+gunicorn==23.0.0
 httpx==0.28.1
 djangorestframework==3.18.0
 djangorestframework-simplejwt==5.5.1

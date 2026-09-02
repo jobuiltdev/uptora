@@ -7,6 +7,8 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  MessageSquare,
+  Settings,
   Siren,
   X,
 } from "lucide-react";
@@ -20,11 +22,13 @@ const links = [
   ["/websites", "Websites", Globe2],
   ["/incidents", "Incidents", Siren],
   ["/settings/notifications", "Notifications", Bell],
+  ["/settings/account", "Account", Settings],
 ] as const;
 export function AppShell({ children }: { children: React.ReactNode }) {
   const path = usePathname(),
     router = useRouter(),
     [open, setOpen] = useState(false);
+  const feedbackEmail = process.env.NEXT_PUBLIC_FEEDBACK_EMAIL;
   const session = useQuery<User>({
     queryKey: ["session"],
     queryFn: async () => {
@@ -61,6 +65,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         ))}
       </nav>
       <div className="mt-auto border-t border-white/10 pt-4">
+        {feedbackEmail && (
+          <a
+            className="mb-2 flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-[#d4e2dc] hover:bg-white/7"
+            href={`mailto:${feedbackEmail}?subject=Uptora private alpha feedback`}
+          >
+            <MessageSquare size={17} />
+            Send feedback
+          </a>
+        )}
         <p className="truncate px-3 text-xs text-[#a8c3b6]">
           {session.data?.email ?? "Loading account…"}
         </p>

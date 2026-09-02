@@ -14,14 +14,17 @@ describe("AuthForm", () => {
   });
 
   it("submits registration through the same-origin auth handler", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ id: 1, email: "owner@example.com" }), {
-        status: 201,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ enabled: true }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: 1, email: "owner@example.com" }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
     render(<AuthForm mode="register" />);
-    fireEvent.change(screen.getByLabelText("Email"), {
+    fireEvent.change(await screen.findByLabelText("Email"), {
       target: { value: "owner@example.com" },
     });
     fireEvent.change(screen.getByLabelText("Password"), {
@@ -33,6 +36,22 @@ describe("AuthForm", () => {
       "/api/auth/register",
       expect.objectContaining({ method: "POST" }),
     );
+  });
+
+  it("shows a clean private-alpha state when registration is disabled", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json({ enabled: false }));
+    render(<AuthForm mode="register" />);
+    expect(
+      await screen.findByRole("heading", { name: "Private alpha" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Create account" }),
+    ).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/auth/registration-status", {
+      cache: "no-store",
+    });
   });
 
   it("shows a backend login failure without navigating", async () => {

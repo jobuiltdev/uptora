@@ -1,3 +1,4 @@
+from django.conf import settings
 from rest_framework import generics, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -22,6 +23,23 @@ class RegisterView(generics.CreateAPIView):
     permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'register'
+
+    def create(self, request, *args, **kwargs):
+        if not settings.REGISTRATION_ENABLED:
+            return Response(
+                {'detail': 'Registration is currently limited to private-alpha testers.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().create(request, *args, **kwargs)
+
+
+class RegistrationStatusView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = []
+
+    def get(self, request):
+        return Response({'enabled': settings.REGISTRATION_ENABLED})
 
 
 class LoginView(TokenObtainPairView):

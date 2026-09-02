@@ -40,3 +40,9 @@ requires the declared Playwright Chromium build.
 
 Failure evidence is deliberately not exposed through `MEDIA_URL`. It is streamed
 through the authenticated, owner-scoped check-result evidence endpoint.
+
+Private-alpha deployment, retention, and operator procedures live in:
+
+- `docs/private-alpha-deployment.md`
+- `docs/data-retention.md`
+- `docs/alpha-runbook.md`

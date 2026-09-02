@@ -17,7 +17,10 @@ export function DashboardView() {
   if (query.isLoading) return <State text="Loading portfolio health…" />;
   if (query.isError)
     return (
-      <State text="The dashboard could not reach Uptora. Your monitors continue running in the background." />
+      <State
+        text="The dashboard could not reach Uptora. Your monitors continue running in the background."
+        retry={() => query.refetch()}
+      />
     );
   const data = query.data!;
   const cards = [
@@ -35,6 +38,7 @@ export function DashboardView() {
           Confirmed incidents, recent checks, and what needs attention now.
         </p>
       </header>
+      <OnboardingChecklist data={data} />
       <section className="grid-cards">
         {cards.map(([label, value, Icon]) => (
           <article className="card p-5" key={label}>
@@ -189,10 +193,79 @@ export function DashboardView() {
     </div>
   );
 }
-function State({ text }: { text: string }) {
+export function OnboardingChecklist({ data }: { data: Dashboard }) {
+  const steps = [
+    {
+      done: data.summary.websites > 0,
+      title: "Add your first website",
+      text: "Choose the client website Uptora should watch.",
+      href: "/websites/new",
+      action: "Add website",
+    },
+    {
+      done: data.summary.enabled_monitors > 0,
+      title: "Create a monitor",
+      text: "HTTP checks availability; Browser checks rendered content; Contact form submits a real test form.",
+      href: data.websites[0]
+        ? `/websites/${data.websites[0].id}`
+        : "/websites/new",
+      action: "Choose monitor",
+    },
+    {
+      done: data.summary.checks_24h > 0,
+      title: "Run and understand a check",
+      text: "A failed check describes the target. An internal Uptora error is shown separately and never opens an incident.",
+      href: data.websites[0]
+        ? `/websites/${data.websites[0].id}`
+        : "/websites/new",
+      action: "View website",
+    },
+  ];
+  if (steps.every((step) => step.done)) return null;
   return (
-    <div className="card p-8 muted" role="status">
-      {text}
+    <section className="card p-6" aria-labelledby="getting-started-title">
+      <p className="eyebrow">Private alpha</p>
+      <h2 id="getting-started-title" className="mt-1 text-lg font-semibold">
+        Getting started
+      </h2>
+      <div className="mt-5 grid gap-4 lg:grid-cols-3">
+        {steps.map((step, index) => (
+          <article
+            className="rounded-xl border border-[#dce3de] p-4"
+            key={step.title}
+          >
+            <p className="text-sm font-semibold">
+              {step.done ? "✓" : index + 1} · {step.title}
+            </p>
+            <p className="muted mt-2 text-sm">{step.text}</p>
+            {!step.done && (
+              <Link
+                className="mt-3 inline-block text-sm font-semibold text-[#1f6b4f]"
+                href={step.href}
+              >
+                {step.action} →
+              </Link>
+            )}
+          </article>
+        ))}
+      </div>
+      <p className="muted mt-5 text-sm">
+        Two consecutive failures open an incident. Configure alerts under
+        Notifications, then share a read-only client report from an incident.
+      </p>
+    </section>
+  );
+}
+
+function State({ text, retry }: { text: string; retry?: () => void }) {
+  return (
+    <div className="card p-8" role="status">
+      <p className="muted">{text}</p>
+      {retry && (
+        <button className="button secondary mt-4" onClick={retry}>
+          Try again
+        </button>
+      )}
     </div>
   );
 }
