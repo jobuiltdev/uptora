@@ -85,6 +85,39 @@ export interface Incident {
   created_at: string;
   updated_at: string;
 }
+export interface IncidentShare {
+  created_at: string;
+  expires_at: string | null;
+  include_evidence: boolean;
+  share_url: string;
+}
+export interface PublicIncidentTimelineEntry {
+  occurred_at: string;
+  outcome: "FAILURE" | "RECOVERY";
+  label: string;
+  summary: string;
+  status_code: number | null;
+  evidence_available: boolean;
+}
+export interface PublicIncidentReport {
+  website_name: string;
+  website_url: string;
+  monitor_type: MonitorType;
+  status: IncidentStatus;
+  started_at: string;
+  resolved_at: string | null;
+  duration_seconds: number;
+  failure_type: string;
+  failure_summary: string;
+  latest_failure_summary: string;
+  status_code: number | null;
+  failure_count: number;
+  recovery_count: number;
+  timeline: PublicIncidentTimelineEntry[];
+  timeline_total_count: number;
+  evidence_available: boolean;
+  captured_at: string;
+}
 export interface Page<T> {
   count: number;
   next: string | null;

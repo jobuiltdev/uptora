@@ -7,6 +7,7 @@ const allowed = [
   /^monitors(?:\/\d+)?\/?$/,
   /^monitors\/\d+\/(?:run|results)\/?$/,
   /^incidents(?:\/\d+)?\/?$/,
+  /^incidents\/\d+\/share(?:\/regenerate)?\/?$/,
   /^notifications\/preferences\/?$/,
   /^check-results\/\d+\/evidence\/?$/,
 ];

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { duration, exactTime } from "@/lib/format";
 import type { Incident, Monitor } from "@/lib/types";
+import { ShareReportSection } from "./share-report-section";
 export function IncidentDetail({ id }: { id: number }) {
   const incident = useQuery({
     queryKey: ["incident", String(id)],
@@ -70,6 +71,7 @@ export function IncidentDetail({ id }: { id: number }) {
           This is an observation, not a causal diagnosis.
         </p>
       </section>
+      <ShareReportSection incidentId={i.id} />
       <div>
         <Link
           className="button secondary"

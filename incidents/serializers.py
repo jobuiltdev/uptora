@@ -1,6 +1,8 @@
+from django.conf import settings
+from django.utils import timezone
 from rest_framework import serializers
 
-from incidents.models import Incident
+from incidents.models import Incident, IncidentShare
 
 
 class IncidentSerializer(serializers.ModelSerializer):
@@ -44,3 +46,26 @@ class IncidentSerializer(serializers.ModelSerializer):
         if incident.resolved_at is None:
             return None
         return int((incident.resolved_at - incident.started_at).total_seconds())
+
+
+class IncidentShareCreateSerializer(serializers.Serializer):
+    expires_at = serializers.DateTimeField(required=False, allow_null=True)
+    include_evidence = serializers.BooleanField(default=True)
+
+    def validate_expires_at(self, value):
+        if value is not None and value <= timezone.now():
+            raise serializers.ValidationError('Expiry must be in the future.')
+        return value
+
+
+class IncidentShareSerializer(serializers.ModelSerializer):
+    share_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = IncidentShare
+        fields = ('created_at', 'expires_at', 'include_evidence', 'share_url')
+        read_only_fields = fields
+
+    def get_share_url(self, share):
+        base_url = settings.APP_BASE_URL.rstrip('/')
+        return f'{base_url}/share/incidents/{share.token}'
