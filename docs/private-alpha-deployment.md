@@ -1,5 +1,11 @@
 # Private-alpha deployment
 
+For the selected Vercel frontend + Railway backend topology, follow
+[railway-private-alpha.md](railway-private-alpha.md). In that topology Vercel
+cannot use a Railway-private hostname: its BFF needs a public HTTPS API origin
+kept in server-only configuration. The generic single-network plan below does
+not override that boundary.
+
 This plan targets 3–5 agencies or freelancers. It uses ordinary Linux services
 and managed infrastructure where available; it does not depend on a particular
 hosting vendor.

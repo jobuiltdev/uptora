@@ -50,6 +50,9 @@ if TRUST_PROXY_HEADERS:
     USE_X_FORWARDED_HOST = True
 
 SECURE_SSL_REDIRECT = env_bool('DJANGO_SECURE_SSL_REDIRECT', IS_PRODUCTION)
+# Platform liveness probes arrive over container HTTP. Exempt only this cheap,
+# non-sensitive endpoint; readiness, auth, admin and evidence still require TLS.
+SECURE_REDIRECT_EXEMPT = [r'^api/health/$']
 SESSION_COOKIE_SECURE = env_bool('DJANGO_SESSION_COOKIE_SECURE', IS_PRODUCTION)
 CSRF_COOKIE_SECURE = env_bool('DJANGO_CSRF_COOKIE_SECURE', IS_PRODUCTION)
 SECURE_HSTS_SECONDS = int(os.getenv('DJANGO_SECURE_HSTS_SECONDS', '0'))
@@ -80,6 +83,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -215,7 +219,8 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 
 # Notifications
@@ -308,7 +313,7 @@ STORAGES = {
         'BACKEND': EVIDENCE_STORAGE_BACKEND,
         'OPTIONS': EVIDENCE_STORAGE_OPTIONS,
     },
-    'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+    'staticfiles': {'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage'},
 }
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

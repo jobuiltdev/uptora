@@ -1,0 +1,32 @@
+# Deny by default. Include only the backend application and build inputs.
+**
+!Dockerfile
+!requirements.txt
+!manage.py
+!config/
+!config/**
+!accounts/
+!accounts/**
+!websites/
+!websites/**
+!monitors/
+!monitors/**
+!incidents/
+!incidents/**
+!notifications/
+!notifications/**
+!dashboard/
+!dashboard/**
+
+# Exclude runtime/editor files even when nested in an allowed source directory.
+**/__pycache__/**
+**/*.py[cod]
+**/.env
+**/.env.*
+**/*.log
+**/*.sqlite3
+**/*.png
+**/*.jpg
+**/*.pem
+**/*.key
+**/*~
